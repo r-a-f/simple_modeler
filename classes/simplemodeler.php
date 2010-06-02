@@ -15,7 +15,7 @@
 * modified version of Auto_Modeler by Jeremy Bush, 
 * class name changed to prevent conflicts while using original Auto_Modeler 
 */
-class simplemodeler extends Model 
+class SimpleModeler extends Model 
 {
 	// The database table name
 	protected $table_name = '';
@@ -205,20 +205,20 @@ class simplemodeler extends Model
 		if ($this->loaded())
 		{ 
 			if (!empty($data_to_save))
-				return count(db::update($this->table_name)->set($data_to_save)->where(array($this->primary_key, '=', $this->data[$this->primary_key]))->execute());
+				return count(db::update($this->table_name)->set($data_to_save)->where(array($this->primary_key, '=', $this->data[$this->primary_key]))->execute($this->_db));
 				//return count($this->db->update($this->table_name, $data_to_save, array($this->primary_key => $this->data[$this->primary_key])));
 		}
 		else // Do an insert
 		{
-			$id = db::insert($this->table_name,$data_to_save)->execute()->insert_id() ;
+			$id = db::insert($this->table_name)->values($data_to_save)->execute($this->_db)->insert_id() ;
 			//$id = $this->db->insert($this->table_name, $data_to_save)->insert_id();
 			$this->data[$this->primary_key] = $id;
-			$this->data_original[$this->primary_key] = $id;
+			$this->data_original = $this->data;
 			
 			if ($id AND !empty($this->hash_field))
 			{
 				//$this->db->update($this->table_name, array($this->hash_field => sha1($this->table_name.$id.$this->hash_suffix)), array($this->primary_key => $id));
-				db::update($this->table_name)->set(array($this->hash_field => sha1($this->table_name.$id.$this->hash_suffix)))->where(array($this->primary_key, '=', $this->data[$this->primary_key]))->execute();
+				db::update($this->table_name)->set(array($this->hash_field => sha1($this->table_name.$id.$this->hash_suffix)))->where(array($this->primary_key, '=', $this->data[$this->primary_key]))->execute($this->_db);
 			}
 			
 			return ($id);
@@ -267,12 +267,12 @@ class simplemodeler extends Model
 			//if value is an array, make where statement and load data
 			if (is_array($value))
 			{
-				$data = db::select($this->select)->from($this->table_name)->where($value)->execute();
+				$data = db::select($this->select)->from($this->table_name)->where($value)->execute($this->_db);
 				//$data = $this->db->select($this->select)->$type($value)->get($this->table_name)->result(TRUE);
 			}
 			else //else load by default ID key
 			{
-				$data = db::select($this->select)->from($this->table_name)->where(array($key, '=', $value))->execute();
+				$data = db::select($this->select)->from($this->table_name)->where(array($key, '=', $value))->execute($this->_db);
 				//$data = $this->db->select($this->select)->$type(array($key => $value))->get($this->table_name)->result(TRUE);
 			}
 
@@ -303,12 +303,12 @@ class simplemodeler extends Model
 			//if value is an array, make where statement and load data
 			if (is_array($value))
 			{
-				$data = $data = db::select($this->select)->from($this->table_name)->where($value)->execute();
+				$data = $data = db::select($this->select)->from($this->table_name)->where($value)->execute($this->_db);
 				//$data = $this->db->select($this->select)->$type($value)->get($this->table_name)->result(TRUE, $this->result_object);
 			}
 			else //else load by default ID key
 			{
-				$data = $data = db::select($this->select)->from($this->table_name)->where(array($key, '=', $value))->execute();
+				$data = $data = db::select($this->select)->from($this->table_name)->where(array($key, '=', $value))->execute($this->_db);
 				//$data = $this->db->select($this->select)->$type(array($key => $value))->get($this->table_name)->result(TRUE, $this->result_object);
 			}
 
@@ -335,14 +335,14 @@ class simplemodeler extends Model
 		{
 			//delete  based on passed conditions
 			//return $this->db->delete($this->table_name, $what);
-			return db::delete($this->table_name)->where($what)->execute();
+			return db::delete($this->table_name)->where($what)->execute($this->_db);
 		}
 		//else delete current record
 		elseif (intval($this->data[$this->primary_key]) !== 0) 
 		{
 			//if no conditions and data is loaded -  delete current loaded data by ID
 			//return $this->db->delete($this->table_name, array($this->primary_key => $this->data[$this->primary_key]));
-			return db::delete($this->table_name)->where(array($this->primary_key, '=', $this->data[$this->primary_key]))->execute();
+			return db::delete($this->table_name)->where(array($this->primary_key, '=', $this->data[$this->primary_key]))->execute($this->_db);
 		}
 	}
 
@@ -358,17 +358,24 @@ class simplemodeler extends Model
 		(empty($order_by)) ? $order_by = $this->primary_key : NULL;
 		
 			//if there are limits
-			if ( ! empty($this->limit)) 
-			{
+			//if ( ! empty($this->limit)) 
+			//{
 				//return $this->db->select($this->select)->limit($this->limit,$this->offset)->orderby($order_by, $direction)->get($this->table_name)->result(TRUE, $this->result_object);
-				return db::select($this->select)->limit($this->limit)->offset($this->offset)->order_by($order_by, $direction)->from($this->table_name)->execute();
-			}
+				$query =  db::select($this->select)->order_by($order_by, $direction);
+				
+				if ( ! empty($this->limit)) 
+				{
+					$query->limit($this->limit)->offset($this->offset);
+				}
+				
+				$query->from($this->table_name)->execute($this->_db);
+			//}
 			//else get all records from table
-			else
+			/*else
 			{
 				//return $this->db->select($this->select)->orderby($order_by, $direction)->get($this->table_name)->result(TRUE, $this->result_object);
-				return db::select($this->select)->order_by($order_by, $direction)->from($this->table_name)->execute();
-			}
+				return db::select($this->select)->order_by($order_by, $direction)->from($this->table_name)->execute($this->_db);
+			} */
 		
 		return NULL;
 	} 
@@ -381,25 +388,41 @@ class simplemodeler extends Model
 	* @param string $direction sorting	
 	* @return mixed
 	*/
-	public function fetch_where($where = array(), $order_by = NULL, $direction = 'ASC')
+	public function fetch_where($wheres = array(), $order_by = NULL, $direction = 'ASC')
 	{	
 		(empty($order_by)) ? $order_by = $this->primary_key : NULL;
+		
 		$type = $this->where;
-		if (! is_array($where) OR count($where) != 3)
+		
+		if (! is_array($where))
 			return FALSE;
 			
-			//if fetch with limits	
-			if ( ! empty($this->limit)) 
-			{
 				//return $this->db->select($this->select)->$type($where)->limit($this->limit,$this->offset)->orderby($order_by, $direction)->get($this->table_name)->result(TRUE, $this->result_object);
-				return db::select($this->select)->limit($this->limit)->offset($this->offset)->order_by($order_by, $direction)->$type($where[0],$where[1],$where[2])->from($this->table_name)->execute();
-			}
+				//return db::select($this->select)->limit($this->limit)->offset($this->offset)->order_by($order_by, $direction)->$type($where[0],$where[1],$where[2])->from($this->table_name)->execute();
+				$query = db::select($this->select)->order_by($order_by, $direction);
+
+				if ( ! empty($this->limit))
+				{ 				
+					$query->limit($this->limit)->offset($this->offset);
+				}
+		
+				foreach ($wheres as $where)
+					$query->{$this->where}($where[0], $where[1], $where[2]);
+		
+				return $query->from($this->table_name)->execute($this->_db);
+			//}
 			//else get all records from table based on passed conditions
-			else
+			/*else
 			{ 
 				//return $this->db->select($this->select)->$type($where)->orderby($order_by, $direction)->get($this->table_name)->result(TRUE, $this->result_object);
-				return db::select($this->select)->order_by($order_by, $direction)->$type($where[0],$where[1],$where[2])->from($this->table_name)->execute();
-			}
+				//return db::select($this->select)->order_by($order_by, $direction)->$type($where[0],$where[1],$where[2])->from($this->table_name)->execute();
+				$query = db::select($this->select)->order_by($order_by, $direction)->as_object('Model_'.inflector::singular(ucwords($this->_table_name)));
+		
+				foreach ($wheres as $where)
+					$query->{$this->where}($where[0], $where[1], $where[2]);
+		
+				return $query->from($this->table_name)->execute($this->_db);
+			}*/
 		
 		return NULL;
 	}
@@ -413,7 +436,7 @@ class simplemodeler extends Model
 	public function query($sql)
 	{
 		//return $this->db->query($sql)->result(TRUE, $this->result_object);
-		return db::query($sql)->execute();
+		return db::query($sql)->execute($this->_db);
 	} 
 		
 	/**
@@ -564,24 +587,27 @@ class simplemodeler extends Model
 	* @param string $direction query sorting				
 	* @return array
 	*/
-	public function select_list($key, $display, $order_by = NULL, $where = array(), $direction = 'ASC')
+	public function select_list($key, $display, $order_by = NULL,  $direction = 'ASC', $where = array())
 	{
 		(empty($order_by)) ? $order_by = $this->primary_key : NULL;
 		
 		$rows = array();
 
-		if (empty($where))
+          $this->select = array($key, $display);
+          $query = empty($where) ? $this->fetch_all($order_by, $direction) : $this->fetch_where($where, $order_by, $direction);
+
+		/*if (empty($where))
 		{
 			//if no where statements, get all records 
 			//$query = $this->db->select($key,$display)->orderby($order_by,$direction)->get($this->table_name)->result(TRUE);
-			$query = db::select(array($key, $display))->order_by($order_by,$direction)->from($this->table_name)->execute()->as_object(NULL,TRUE);
+			$query = db::select(array($key, $display))->order_by($order_by,$direction)->from($this->table_name)->execute($this->_db)->as_object(NULL,TRUE);
 		}
 		else
 		{
 			//get using where statement
 			//$query = $this->db->select($key,$display)->$type($where)->orderby($order_by,$direction)->get($this->table_name)->result(TRUE);
-			$query = db::select(array($key, $display))->where($where)->order_by($order_by,$direction)->from($this->table_name)->execute()->as_object(NULL,TRUE);
-		}
+			$query = db::select(array($key, $display))->where($where)->order_by($order_by,$direction)->from($this->table_name)->execute($this->_db)->as_object(NULL,TRUE);
+		} */
 
 		foreach ($query as $row)
 		{
@@ -665,7 +691,7 @@ class simplemodeler extends Model
 	public function explain()
 	{
 		//get columns from database
-		$columns = array_keys($this->db->list_fields($this->table_name, TRUE));
+		$columns = array_keys($this->_db->list_fields($this->table_name, TRUE));
 		$data = array();
 
 		//assign default empty values
@@ -740,18 +766,7 @@ class simplemodeler extends Model
 	public function __wakeup()
 	{
 		// Initialize database
-		$this->db = Database::instance($this->db);
+		$this->_db = Database::instance($this->_db);
 	}
 
-}
-
-class simplemodeler_Exception extends Kohana_Exception
-{
-	public $errors = array();
-
-	public function __construct($title, $message, $errors)
-	{
-		parent::__construct($title, $message);
-		$this->errors = $errors;
-	}
 }
