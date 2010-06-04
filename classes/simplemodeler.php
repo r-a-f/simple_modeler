@@ -187,7 +187,7 @@ class SimpleModeler extends Model
 
 		if (empty($this->data_to_save))
 			return NULL;
-
+          
 		$this->check_timestamp($this->loaded());
 		$this->check_skip();
 
@@ -199,15 +199,15 @@ class SimpleModeler extends Model
 		else // Do an insert
 		{
 			$id = db::insert($this->table_name)->columns(array_keys($this->data_to_save))->values(array_values($this->data_to_save))->execute($this->_db);
-			$this->data[$this->primary_key] = $id;
+			$this->data[$this->primary_key] = $id[0];
 			$this->data_original = $this->data;
 			
-			if ($id AND !empty($this->hash_field))
+			if (! empty($id[0]) AND !empty($this->hash_field))
 			{
-				db::update($this->table_name)->set(array($this->hash_field => sha1($this->table_name.$id.$this->hash_suffix)))->where($this->primary_key, '=', $this->data[$this->primary_key])->execute($this->_db);
+				db::update($this->table_name)->set(array($this->hash_field => sha1($this->table_name.$id[0].$this->hash_suffix)))->where($this->primary_key, '=', $this->data[$this->primary_key])->execute($this->_db);
 			}
 			
-			return ($id);
+			return $id;
 		}
 		return NULL;
 	}
