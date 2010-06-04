@@ -2,12 +2,12 @@
 /**
 * Simple_Modeler
 *
-* @package		Simple_Modeler
+* @package		SimpleModeler
 * @author			thejw23
 * @copyright		(c) 2009 thejw23
 * @license		http://www.opensource.org/licenses/isc-license.txt
-* @version		1.0 for KohanaPHP 3.x
-* @last change		first beta version
+* @version		2.0 for KohanaPHP 3.x
+* @last change		RC1
 * 
 * @NOTICE			table columns should be different from class varibales/methods names
 * @NOTICE			ie. having table column 'timestamp' or 'skip' may (and probably will) lead to problems
@@ -33,6 +33,7 @@ class SimpleModeler extends Model
 	// store single record database fields and values
 	protected $data = Array();
 	protected $data_original = Array();
+	protected $data_to_save = Array();
 		
 	// array, 'form field name' => 'database field name'
 	public $aliases = Array(); 
@@ -51,7 +52,8 @@ class SimpleModeler extends Model
 	public $where = 'and_where';
 	
 	//fetch only those fields, if empty select all fields
-	public $select = '*';
+	//public $select = '*';
+	public $select = array('*');
 
 	//array with offset and limit for limiting query result
 	public $limit;
@@ -59,11 +61,13 @@ class SimpleModeler extends Model
 	
 	//db result object type
 	public $result_object = 'stdClass'; //defaults, arrays: MYSQL_ASSOC objects: stdClass 
+	
+	public $auto_fields = FALSE;
 
 	/**
 	* Constructor
 	*
-	* @param integer|array $id unique record to be loaded	
+	* @param integer $id unique record to be loaded	
 	* @return void
 	*/
 	public function __construct($id = FALSE)
@@ -100,10 +104,10 @@ class SimpleModeler extends Model
 	* @param integer|array $id unique record to be loaded	
 	* @return object
 	*/
-	public static function instance($model, $id = FALSE)
+	public static function instance($model = '', $id = FALSE)
 	{
 		static $instance;
-		$model = empty($model) ? __CLASS__ : ucwords($model).'_Model';
+		$model = empty($model) ? __CLASS__ : 'Model_'.ucwords($model);
 		// Load the Simple_Modeler instance
 		empty($instance) and $instance = new $model($id);
 		
@@ -123,7 +127,6 @@ class SimpleModeler extends Model
 	{
 		$out = "";
 		
-		//get columns from table
 		$columns = $this->explain();
 		
 		if (!empty($columns))
@@ -134,12 +137,10 @@ class SimpleModeler extends Model
 			{
 				$out .= "\t\t'".$column."' => '',<br />"; 
 			}
-			//remove last comma
 			$out = rtrim($out,',<br />');
 			$out .= "<br />\t\t);</pre>";	
 		}
 		
-		//return formatted html code
 		return $out;
 	}
 
@@ -161,17 +162,12 @@ class SimpleModeler extends Model
 	*/
 	public function set_fields($data)
 	{
-		//make sure that table columns are loaded
-		//$this->load_columns();
-
-		//assign new valuse to current data
 		foreach ($data as $key => $value)
 		{
 			$key = $this->check_alias($key);
 
 			if (array_key_exists($key, $this->data))
 			{
-				//skip field not existing in current table
 				($this->auto_trim) ? $this->data[$key] = trim($value) : $this->data[$key] = $value;
 			}
 		}
@@ -186,39 +182,29 @@ class SimpleModeler extends Model
 	*/
 	public function save()
 	{
-		//make sure that table columns are loaded
-		//$this->load_columns();
+		$this->data_to_save = array();
+		$this->data_to_save = array_diff_assoc($this->data, $this->data_original);
 
-		// $data_to_save=$this->data;
-		$data_to_save = array_diff_assoc($this->data, $this->data_original);
-
-		// if no changes, quit
-		if (empty($data_to_save))
-		{
+		if (empty($this->data_to_save))
 			return NULL;
-		}
 
-		$this->check_timestamp(& $data_to_save, $this->loaded());
-		$this->check_skip(& $data_to_save);
+		$this->check_timestamp($this->loaded());
+		$this->check_skip();
 
 		// Do an update
 		if ($this->loaded())
 		{ 
-			if (!empty($data_to_save))
-				return count(db::update($this->table_name)->set($data_to_save)->where(array($this->primary_key, '=', $this->data[$this->primary_key]))->execute($this->_db));
-				//return count($this->db->update($this->table_name, $data_to_save, array($this->primary_key => $this->data[$this->primary_key])));
+			return count(db::update($this->table_name)->set($this->data_to_save)->where($this->primary_key, '=', $this->data[$this->primary_key])->execute($this->_db));
 		}
 		else // Do an insert
 		{
-			$id = db::insert($this->table_name)->values($data_to_save)->execute($this->_db)->insert_id() ;
-			//$id = $this->db->insert($this->table_name, $data_to_save)->insert_id();
+			$id = db::insert($this->table_name)->columns(array_keys($this->data_to_save))->values(array_values($this->data_to_save))->execute($this->_db);
 			$this->data[$this->primary_key] = $id;
 			$this->data_original = $this->data;
 			
 			if ($id AND !empty($this->hash_field))
 			{
-				//$this->db->update($this->table_name, array($this->hash_field => sha1($this->table_name.$id.$this->hash_suffix)), array($this->primary_key => $id));
-				db::update($this->table_name)->set(array($this->hash_field => sha1($this->table_name.$id.$this->hash_suffix)))->where(array($this->primary_key, '=', $this->data[$this->primary_key]))->execute($this->_db);
+				db::update($this->table_name)->set(array($this->hash_field => sha1($this->table_name.$id.$this->hash_suffix)))->where($this->primary_key, '=', $this->data[$this->primary_key])->execute($this->_db);
 			}
 			
 			return ($id);
@@ -234,14 +220,22 @@ class SimpleModeler extends Model
 	*/
 	public function set_result($object = stdClass) 
 	{
-		$this->result_object = $object;
+		if ($object = 'model')
+		{
+			$this->result_object = 'Model_'.inflector::singular(ucwords($this->table_name));
+		}
+		else
+		{
+			$this->result_object = $object;
+		}
+		
 		return $this; 
 	}
 	
 	//reset settings
 	public function reset()
 	{
-		$this->where = 'where';
+		$this->where = 'and_where';
 		$this->select = '*';
 		$this->limit = '';
 		$this->offset = 0; 
@@ -259,33 +253,16 @@ class SimpleModeler extends Model
 	public function load($value, $key = NULL)
 	{
 		(empty($key)) ? $key = $this->primary_key : NULL;
-
-		//make sure that table columns are loaded
-		//$this->load_columns();
 		
-			//get data
-			//if value is an array, make where statement and load data
-			if (is_array($value))
-			{
-				$data = db::select($this->select)->from($this->table_name)->where($value)->execute($this->_db);
-				//$data = $this->db->select($this->select)->$type($value)->get($this->table_name)->result(TRUE);
-			}
-			else //else load by default ID key
-			{
-				$data = db::select($this->select)->from($this->table_name)->where(array($key, '=', $value))->execute($this->_db);
-				//$data = $this->db->select($this->select)->$type(array($key => $value))->get($this->table_name)->result(TRUE);
-			}
+		$data = db::select_array($this->select)->from($this->table_name)->where($key, '=', $value)->as_object($this->result_object)->execute($this->_db);
 
-			// try and assign the data
-			if (count($data) === 1 AND $data = $data->current())
-			{
-				// set original data
-				$this->data_original = (array) $data;
-				// set current data
-				$this->data = $this->data_original; 
-			}
-		
-			return $this;
+		if (count($data) === 1 AND $data = $data->current())
+		{
+			$this->data_original = (array) $data;
+			$this->data = $this->data_original; 
+		}
+	
+		return $this;
 	}
 	
 	/**
@@ -299,51 +276,29 @@ class SimpleModeler extends Model
 	{
 		(empty($key)) ? $key = $this->primary_key : NULL;
 				
-			// get data
-			//if value is an array, make where statement and load data
-			if (is_array($value))
-			{
-				$data = $data = db::select($this->select)->from($this->table_name)->where($value)->execute($this->_db);
-				//$data = $this->db->select($this->select)->$type($value)->get($this->table_name)->result(TRUE, $this->result_object);
-			}
-			else //else load by default ID key
-			{
-				$data = $data = db::select($this->select)->from($this->table_name)->where(array($key, '=', $value))->execute($this->_db);
-				//$data = $this->db->select($this->select)->$type(array($key => $value))->get($this->table_name)->result(TRUE, $this->result_object);
-			}
+		$data = $data = db::select_array($this->select)->from($this->table_name)->where($key, '=', $value)->as_object($this->result_object)->execute($this->_db);
 
-			// try and assign the data
-			if (count($data) === 1 AND $data = $data->current())
-			{				
-				return $data;
-			}
+		if (count($data) === 1 AND $data = $data->current())
+		{				
+			return $data;
+		}
 
-			return NULL;
+		return NULL;
 	}
 	
 
 	/**
 	* Deletes from db current record or condition based records 	
 	*
-	* @param array $what data to be deleted
 	* @return mixed
 	*/ 
-	public function delete($what = array())
+	public function delete()
 	{
-		//delete by conditions
-		if (( ! empty($what)) AND (is_array($what)))
+		if (intval($this->data[$this->primary_key]) !== 0) 
 		{
-			//delete  based on passed conditions
-			//return $this->db->delete($this->table_name, $what);
-			return db::delete($this->table_name)->where($what)->execute($this->_db);
+			return db::delete($this->table_name)->where($this->primary_key, '=', $this->data[$this->primary_key])->execute($this->_db);
 		}
-		//else delete current record
-		elseif (intval($this->data[$this->primary_key]) !== 0) 
-		{
-			//if no conditions and data is loaded -  delete current loaded data by ID
-			//return $this->db->delete($this->table_name, array($this->primary_key => $this->data[$this->primary_key]));
-			return db::delete($this->table_name)->where(array($this->primary_key, '=', $this->data[$this->primary_key]))->execute($this->_db);
-		}
+		return NULL;
 	}
 
 	/**
@@ -355,29 +310,17 @@ class SimpleModeler extends Model
 	*/
 	public function fetch_all($order_by = NULL, $direction = 'ASC')
 	{
-		(empty($order_by)) ? $order_by = $this->primary_key : NULL;
-		
-			//if there are limits
-			//if ( ! empty($this->limit)) 
-			//{
-				//return $this->db->select($this->select)->limit($this->limit,$this->offset)->orderby($order_by, $direction)->get($this->table_name)->result(TRUE, $this->result_object);
-				$query =  db::select($this->select)->order_by($order_by, $direction);
+		(empty($order_by)) ? $order_by = $this->primary_key : NULL;   
+
+		$query =  db::select_array($this->select)->order_by($order_by, $direction);
 				
-				if ( ! empty($this->limit)) 
-				{
-					$query->limit($this->limit)->offset($this->offset);
-				}
-				
-				$query->from($this->table_name)->execute($this->_db);
-			//}
-			//else get all records from table
-			/*else
-			{
-				//return $this->db->select($this->select)->orderby($order_by, $direction)->get($this->table_name)->result(TRUE, $this->result_object);
-				return db::select($this->select)->order_by($order_by, $direction)->from($this->table_name)->execute($this->_db);
-			} */
+		if ( ! empty($this->limit)) 
+		{
+			$query->limit($this->limit)->offset($this->offset);
+		}
 		
-		return NULL;
+		$result =  $query->from($this->table_name)->as_object($this->result_object)->execute($this->_db);
+		return $result;
 	} 
 	
 	/**
@@ -394,37 +337,25 @@ class SimpleModeler extends Model
 		
 		$type = $this->where;
 		
-		if (! is_array($where))
+		if (! is_array($wheres))
 			return FALSE;
 			
-				//return $this->db->select($this->select)->$type($where)->limit($this->limit,$this->offset)->orderby($order_by, $direction)->get($this->table_name)->result(TRUE, $this->result_object);
-				//return db::select($this->select)->limit($this->limit)->offset($this->offset)->order_by($order_by, $direction)->$type($where[0],$where[1],$where[2])->from($this->table_name)->execute();
-				$query = db::select($this->select)->order_by($order_by, $direction);
+		$query = db::select_array( $this->select)->order_by($order_by, $direction);
+		 
+		if ( ! empty($this->limit))
+		{ 				
+			$query->limit($this->limit)->offset($this->offset);
+		}
+		
+		foreach ($wheres as $where)
+		{
+			if (is_array($where))
+			{
+				$query->{$this->where}($where[0], $where[1], $where[2]);
+			}
+		}
 
-				if ( ! empty($this->limit))
-				{ 				
-					$query->limit($this->limit)->offset($this->offset);
-				}
-		
-				foreach ($wheres as $where)
-					$query->{$this->where}($where[0], $where[1], $where[2]);
-		
-				return $query->from($this->table_name)->execute($this->_db);
-			//}
-			//else get all records from table based on passed conditions
-			/*else
-			{ 
-				//return $this->db->select($this->select)->$type($where)->orderby($order_by, $direction)->get($this->table_name)->result(TRUE, $this->result_object);
-				//return db::select($this->select)->order_by($order_by, $direction)->$type($where[0],$where[1],$where[2])->from($this->table_name)->execute();
-				$query = db::select($this->select)->order_by($order_by, $direction)->as_object('Model_'.inflector::singular(ucwords($this->_table_name)));
-		
-				foreach ($wheres as $where)
-					$query->{$this->where}($where[0], $where[1], $where[2]);
-		
-				return $query->from($this->table_name)->execute($this->_db);
-			}*/
-		
-		return NULL;
+		return $query->from($this->table_name)->as_object($this->result_object)->execute($this->_db);
 	}
 
 	/**
@@ -433,10 +364,9 @@ class SimpleModeler extends Model
 	* @param string $sql query to be run
 	* @return object
 	*/
-	public function query($sql)
+	public function query($sql, $type = 'SELECT')
 	{
-		//return $this->db->query($sql)->result(TRUE, $this->result_object);
-		return db::query($sql)->execute($this->_db);
+		return db::query($type, $sql)->as_object($this->result_object)->execute($this->_db);
 	} 
 		
 	/**
@@ -454,18 +384,18 @@ class SimpleModeler extends Model
 	*  Checks if given key is a timestamp and should be updated	
 	*
 	* @param string $key key to be checked
-	* @return array
+	* @return nothing
 	*/
-	 public function check_timestamp($data, $create = FALSE)
+	 public function check_timestamp($create = FALSE)
 	 {
 		//update timestamp fields with current datetime
-		if ( ! $create)
+		if ($create)
 		{
 			if ( ! empty($this->timestamp) AND is_array($this->timestamp))
 				foreach ($this->timestamp as $field)
 					if (array_key_exists($field, $this->data_original)) 
 					{
-						$data[$field] = date('Y-m-d H:i:s');
+						$this->data_to_save[$field] = date('Y-m-d H:i:s');
 					}
 		}
 		else
@@ -474,28 +404,26 @@ class SimpleModeler extends Model
 				foreach ($this->timestamp_created as $field)
 					if (array_key_exists($field, $this->data_original))
 					{
-						$data[$field] = date('Y-m-d H:i:s');
+						$this->data_to_save[$field] = date('Y-m-d H:i:s');
 					}
 		}
-		return $data;
+		
 	 }
 	 
 	/**
 	*  Checks if given key should be skipped	
 	*
 	* @param array $data data to be checked
-	* @return object
+	* @return nothing
 	*/
-	 public function check_skip($data)
+	 public function check_skip()
 	 {
 		if ( ! empty($this->skip) AND is_array($this->skip))
 			foreach ($this->skip as $skip)
-				if (array_key_exists($skip, $data))
+				if (array_key_exists($skip, $this->data_to_save))
 				{ 
-					unset($data[$skip]);
+					unset($this->data_to_save[$skip]);
 				}
-				
-		return $data;
 	 }
 	
 	/**
@@ -559,10 +487,16 @@ class SimpleModeler extends Model
 	*
 	* @return integer
 	*/
-	public function count_all() 
+	public function count_all($field = '*') 
 	{
-		//return $this->db->count_records($this->table_name);
-		return db::build()->from($this->table_name)->count_records();
+		$data = db::select(array('COUNT("'.$field.'")', 'total_rows'))->from($this->table_name)->execute($this->_db);
+		
+		if (count($data) === 1 AND $data = $data->current())
+		{				
+			return $data;
+		}
+
+		return NULL;
 	}
 
 	/**
@@ -571,10 +505,26 @@ class SimpleModeler extends Model
 	* @param array $fields query where condition
 	* @return integer
 	*/
-	public function count_where($fields = array()) 
+	public function count_where($wheres = array(), $field = '*') 
 	{
-		//return $this->db->$type($fields)->count_records($this->table_name);
-		return db::build()->from($this->table_name)->where($fields)->count_records();
+		$query = db::select(array('COUNT("'.$field.'")', 'total_rows'));
+
+		foreach ($wheres as $where)
+		{
+			if (is_array($where))
+			{
+				$query->{$this->where}($where[0], $where[1], $where[2]);
+			}
+		}
+
+		$data =  $query->from($this->table_name)->execute($this->_db);
+		
+		if (count($data) === 1 AND $data = $data->current())
+		{				
+			return $data;
+		}
+		
+		return NULL;
 	}
 
 	/**
@@ -593,25 +543,13 @@ class SimpleModeler extends Model
 		
 		$rows = array();
 
-          $this->select = array($key, $display);
+          $this->select(array($key, $display));
+          
           $query = empty($where) ? $this->fetch_all($order_by, $direction) : $this->fetch_where($where, $order_by, $direction);
-
-		/*if (empty($where))
-		{
-			//if no where statements, get all records 
-			//$query = $this->db->select($key,$display)->orderby($order_by,$direction)->get($this->table_name)->result(TRUE);
-			$query = db::select(array($key, $display))->order_by($order_by,$direction)->from($this->table_name)->execute($this->_db)->as_object(NULL,TRUE);
-		}
-		else
-		{
-			//get using where statement
-			//$query = $this->db->select($key,$display)->$type($where)->orderby($order_by,$direction)->get($this->table_name)->result(TRUE);
-			$query = db::select(array($key, $display))->where($where)->order_by($order_by,$direction)->from($this->table_name)->execute($this->_db)->as_object(NULL,TRUE);
-		} */
-
+		var_dump($query);
 		foreach ($query as $row)
 		{
-			//assign key - value for select
+			var_dump($row);
 			$rows[$row->$key] = $row->$display;
 		}
 
@@ -658,13 +596,10 @@ class SimpleModeler extends Model
 	*/
 	public function load_columns() 
 	{
-		//only if table_name is set and there are no columns set
 		if ( ! empty($this->table_name) AND (empty($this->data_original)) )
 		{
-			//only if auto_fields are enabled
 			if (! IN_PRODUCTION AND $this->auto_fields)  
 			{
-				//load from DB
 				$columns = $this->explain();
 	
 				$this->data = $columns;
@@ -690,11 +625,9 @@ class SimpleModeler extends Model
 	*/ 
 	public function explain()
 	{
-		//get columns from database
-		$columns = array_keys($this->_db->list_fields($this->table_name, TRUE));
+		$columns = array_keys($this->_db->list_columns($this->table_name, TRUE));
 		$data = array();
 
-		//assign default empty values
 		foreach ($columns as $column) 
 		{ 
 			$data[$column] = '';
@@ -755,7 +688,7 @@ class SimpleModeler extends Model
 	public function __sleep()
 	{
 		// Store only information about the object without db property
-		return array_diff(array_keys(get_object_vars($this)), array('db'));
+		return array_diff(array_keys(get_object_vars($this)), array('_db'));
 	}
 	
 	/**
