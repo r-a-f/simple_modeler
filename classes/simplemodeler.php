@@ -1,10 +1,11 @@
-<?php
+<?php defined('SYSPATH') or die('No direct script access.');
 /**
-* Simple_Modeler
+ * SimpleModeler - addon for Kohana Model class
 *
 * @package		SimpleModeler
+* @category   		Library
 * @author			thejw23
-* @copyright		(c) 2009 thejw23
+* @copyright		(c) 2009-2010 thejw23
 * @license		http://www.opensource.org/licenses/isc-license.txt
 * @version		2.0 for KohanaPHP 3.x
 * @last change		RC1
@@ -12,64 +13,114 @@
 * @NOTICE			table columns should be different from class varibales/methods names
 * @NOTICE			ie. having table column 'timestamp' or 'skip' may (and probably will) lead to problems
 *  
-* modified version of Auto_Modeler by Jeremy Bush, 
+* modified (a lot) version of Auto_Modeler by Jeremy Bush, 
 * class name changed to prevent conflicts while using original Auto_Modeler 
 */
+
 class SimpleModeler extends Model 
 {
-	// The database table name
+	/**
+	 * @var  string  Table name
+	 */
 	protected $table_name = '';
 	
-	//primary key for the table
+	/**
+	 * @var  string  Primary Key of a table
+	 */
 	protected $primary_key = 'id';
 	
-	//id hash field
+	/**
+	 * @var  string  Table field to store hashed Primary Key
+	 */
 	protected $hash_field = '';
+	
+	/**
+	 * @var  string  Suffix added to each hashed record
+	 */
 	protected $hash_suffix = '';
 	 	
-	//if true all fields will be trimmed before save
+	/**
+	 * @var  boolean  Weather or not to trim all saved fields
+	 */
 	protected $auto_trim = FALSE;
 
-	// store single record database fields and values
-	protected $data = Array();
+	/**
+	 * @var  array  Record loaded from the database with load() 
+	 */
 	protected $data_original = Array();
+	
+	/**
+	 * @var  array  Record modified by set_fields()
+	 */
+	protected $data = Array();
+
+	/**
+	 * @var  array  Changes between loaded data ($data_original) and modified data ($data) 
+	 */
 	protected $data_to_save = Array();
 		
-	// array, 'form field name' => 'database field name'
+	/**
+	 * @var  array  Aliases: 'form field name' => 'database field name'
+	 */
 	public $aliases = Array(); 
 
-	// skip those fields from save to database
+	/**
+	 * @var  array  Field to be skipped durring the save()
+	 */
 	public $skip = Array ();
 
-	// timestamp fields, they will be auto updated on db update
-	// update is only if table has a column with given name
+	/**
+	 * @var  array  Fields updated with timestamp, on each save() after update.
+	 */
 	public $timestamp = Array('time_stamp');
 	
-	//timestamp fields updated only on db insert
+	/**
+	 * @var  array  Fields updated with timestamp, on each save() after insert.
+	 */
 	public $timestamp_created = Array('time_stamp_created');
 
-	//type of where statement: and_where, or_where, like, orlike...
+	/**
+	 * @var  string  Type of where statement. 
+	 */
 	public $where = 'and_where';
 	
-	//fetch only those fields, if empty select all fields
-	//public $select = '*';
+	/**
+	 * @var  array  Fields to be selected, for fetch_all() and fetch_where() 
+	 */
 	public $select = array('*');
 
-	//array with offset and limit for limiting query result
+	/**
+	 * @var  integer  Number of returned rows for fetch_all() and fetch_where() 
+	 */
 	public $limit;
+	
+	/**
+	 * @var  array  number of row to start from, for fetch_all() and fetch_where() 
+	 */
 	public $offset = 0; 
 	
-	//db result object type
+	/**
+	 * @var  string  Type of the returned object 
+	 */
 	public $result_object = 'stdClass'; //defaults, arrays: MYSQL_ASSOC objects: stdClass 
+	//to use model class as output: 'Model_'.inflector::singular(ucwords($my_model->table_name));
 	
+	/**
+	 * @var  boolean  Weather or not read fields from the database or from the model class ($data) 
+	 */
 	public $auto_fields = FALSE;
 
 	/**
-	* Constructor
-	*
-	* @param integer $id unique record to be loaded	
-	* @return void
-	*/
+	 * Constructor, optionally loads the row with given primary key
+	 *
+	 *     // load the row with ID = 3
+	 *     $row = new My_Model(3);
+	 *
+	 * @param   integer  value of primary key to be loaded
+	 * @return  object
+	 * @uses    load()
+	 * @uses    load_columns()	 	 
+	 */
 	public function __construct($id = FALSE)
 	{
 		parent::__construct();
@@ -79,17 +130,21 @@ class SimpleModeler extends Model
 			$this->load($id);
 		}
 		
+		//make sure that $data and $data_original are filled
 		$this->load_columns();   
 	}
 		
 	/**
-	* Return a static instance of Simple_Modeler.
-	* Useful for one line method chaining.	
-	*
-	* @param string $model name of the model class to be created
-	* @param integer|array $id unique record to be loaded	
-	* @return object
-	*/
+	 * Return a new instance of SimpleModeler model. Useful for one line method chaining.
+	 * optionally loads the row with given primary key
+	 * 	 
+	 *     // load the row with ID = 3
+	 *     $row = SimpleModeler::factory('my_model',3);
+	 *
+	 * @param   string  model name	 
+	 * @param   integer  value of primary key to be loaded
+	 * @return  object 
+	 */
 	public static function factory($model, $id = FALSE)
 	{
 		$model = empty($model) ? __CLASS__ : 'Model_'.ucwords($model);
@@ -97,13 +152,16 @@ class SimpleModeler extends Model
 	}
 	
 	/**
-	* Create an instance of Simple_Modeler.
-	* Useful for one line method chaining.	
-	*
-	* @param string $model name of the model class to be created
-	* @param integer|array $id unique record to be loaded	
-	* @return object
-	*/
+	 * Return a static instance of SimpleModeler model. Useful for one line method chaining.
+	 * optionally loads the row with given primary key
+	 * 	 
+	 *     // load the row with ID = 3
+	 *     $row = SimpleModeler::instance('my_model',3);
+	 *
+	 * @param   string  model name	 
+	 * @param   integer  value of primary key to be loaded
+	 * @return  object
+	 */
 	public static function instance($model = '', $id = FALSE)
 	{
 		static $instance;
@@ -119,10 +177,12 @@ class SimpleModeler extends Model
 	}
 	
 	/**
-	* Generates user fiendly $data array with table columns	
-	*
-	* @return string
-	*/
+	 * Generates user fiendly $data array with table columns
+	 * 	 
+	 *     echo SimpleModeler::instance('my_model')->generate_data();
+	 *
+	 * @return  string
+	 */
 	public function generate_data() 
 	{
 		$out = "";
@@ -145,21 +205,25 @@ class SimpleModeler extends Model
 	}
 
 	/**
-	* Shows table name of the loaded model
-	*	
-	* @return string
-	*/
+	 * Return table name of the loaded model
+	 * 	 
+	 *     $table = SimpleModeler::instance('my_model')->get_table_name();
+	 *
+	 * @return string
+	 */
 	public function get_table_name() 
 	{
 		return $this->table_name;
 	}
 
 	/**
-	*  Allows for setting data fields in bulk	
-	*
-	* @param array $data data passed to $data
-	* @return object
-	*/
+	 * set new values for a row, ready to be saved. 
+	 * 	 
+	 *     $my_model->set_data($data);
+	 *	 
+	 * @param array $data data passed to $data
+	 * @return  object
+	 */
 	public function set_fields($data)
 	{
 		foreach ($data as $key => $value)
@@ -176,12 +240,20 @@ class SimpleModeler extends Model
 	}
 
 	/**
-	*  Saves the current $data to DB	
-	*
-	* @return mixed
-	*/
+	 * save data into database
+	 * 	 
+	 *     $my_model->save();
+	 *     //or
+	 *     $my_model->set_data($data)->save();	 	 
+	 *	 
+	 * @return  object
+	 * @uses    check_timestamp()
+	 * @uses    check_skip()
+	 * @uses    loaded() 	 	 
+	 */
 	public function save()
 	{
+		//make sure that every save() has a clear record at the start.
 		$this->data_to_save = array();
 		$this->data_to_save = array_diff_assoc($this->data, $this->data_original);
 
@@ -213,30 +285,16 @@ class SimpleModeler extends Model
 	}
 	
 	/**
-	*  Set the DB results object type	
-	*
-	* @param string $object type or returned object
-	* @return object
-	*/
-	public function set_result($object = stdClass) 
-	{
-		if ($object = 'model')
-		{
-			$this->result_object = 'Model_'.inflector::singular(ucwords($this->table_name));
-		}
-		else
-		{
-			$this->result_object = $object;
-		}
-		
-		return $this; 
-	}
-	
-	//reset settings
+	 * reset settings
+	 * 	 
+	 *     $my_model->reset();
+	 *	 
+	 * @return  object
+	 */
 	public function reset()
 	{
 		$this->where = 'and_where';
-		$this->select = '*';
+		$this->select = array('*');
 		$this->limit = '';
 		$this->offset = 0; 
 		$this->result_object = 'stdClass';
@@ -244,12 +302,16 @@ class SimpleModeler extends Model
 	}
 	
 	/**
-	* load single record based on unique field value	
-	*
-	* @param array|integer $value column value
+	 * load single record based on primary key field value. 
+	 * 	 
+	 *     $my_model->load(3);
+	 *     //or
+	 *     $row = SimpleModeler::instance('My_Model')->load(3);	 	 
+	 *	 
+	* @param mixed $value column value
 	* @param string $key column name  	 
-	* @return object
-	*/
+	* @return self
+	 */
 	public function load($value, $key = NULL)
 	{
 		(empty($key)) ? $key = $this->primary_key : NULL;
@@ -266,12 +328,16 @@ class SimpleModeler extends Model
 	}
 	
 	/**
-	*  Returns single record without using $data		
-	*
-	* @param array|integer $value column value
-	* @param string $key column name  	
-	* @return mixed
-	*/
+	 * Returns single record without using $data	 
+	 * 	 
+	 *     $my_model->fetch_row(3);
+	 *     //or
+	 *     $row = SimpleModeler::instance('My_Model')->fetch_row(3);	 	 
+	 *	 
+	* @param mixed $value column value
+	* @param string $key column name  	 
+	* @return self
+	 */
 	public function fetch_row($value, $key = NULL) 
 	{
 		(empty($key)) ? $key = $this->primary_key : NULL;
@@ -288,26 +354,34 @@ class SimpleModeler extends Model
 	
 
 	/**
-	* Deletes from db current record or condition based records 	
-	*
-	* @return mixed
-	*/ 
+	 * delete current record loaded with load()
+	 * 	 
+	 *     $my_model->delete();
+	 *	 
+	 * @return  mixed
+	 */
 	public function delete()
 	{
-		if (intval($this->data[$this->primary_key]) !== 0) 
+		//if (intval($this->data[$this->primary_key]) !== 0) 
+		if (! empty($this->data[$this->primary_key]))
 		{
 			return db::delete($this->table_name)->where($this->primary_key, '=', $this->data[$this->primary_key])->execute($this->_db);
 		}
-		return NULL;
+		return FALSE;
 	}
 
 	/**
-	*  Fetches all records from the table	
-	*
-	* @param string $order_by ordering
-	* @param string $direction sorting	
-	* @return mixed
-	*/
+	 * Fetches all records from the table 
+	 * 	 
+	 *     $my_model->fetch_all();
+	 *     //or
+	 *     $row = SimpleModeler::instance('My_Model')->fetch_all('name','desc');	 	 
+	 *	 
+	 * @param string $order_by ordering
+	 * @param string $direction sorting	
+	 * @return mixed
+	 * @uses    limit() 
+	 */
 	public function fetch_all($order_by = NULL, $direction = 'ASC')
 	{
 		(empty($order_by)) ? $order_by = $this->primary_key : NULL;   
@@ -324,13 +398,16 @@ class SimpleModeler extends Model
 	} 
 	
 	/**
-	*  Fetches some records from the table	
-	*
-	* @param array $where where conditions	
-	* @param string $order_by ordering
-	* @param string $direction sorting	
-	* @return mixed
-	*/
+	 * Fetches all records from the table 
+	 * 	 
+	 *     $where = array('name','=','grealt');                                                           
+	 *     $row = SimpleModeler::instance('My_Model')->fetch_where($where,'name','desc');	 	 
+	 *	 
+	 * @param string $order_by ordering
+	 * @param string $direction sorting	
+	 * @return mixed
+	 * @uses    limit() 
+	 */
 	public function fetch_where($wheres = array(), $order_by = NULL, $direction = 'ASC')
 	{	
 		(empty($order_by)) ? $order_by = $this->primary_key : NULL;
@@ -340,7 +417,7 @@ class SimpleModeler extends Model
 		if (! is_array($wheres))
 			return FALSE;
 			
-		$query = db::select_array( $this->select)->order_by($order_by, $direction);
+		$query = db::select_array($this->select)->order_by($order_by, $direction);
 		 
 		if ( ! empty($this->limit))
 		{ 				
@@ -359,11 +436,14 @@ class SimpleModeler extends Model
 	}
 
 	/**
-	*  Run query on DB	
-	*
-	* @param string $sql query to be run
-	* @return object
-	*/
+	 * run custom query
+	 * 	                                                           
+	 *     $my_model->query('select * from clients','SELECT');	 	 
+	 *	 
+	 * @param string $sql query to run
+	 * @param string $type query type	
+	 * @return mixed
+	 */
 	public function query($sql, $type = 'SELECT')
 	{
 		return db::query($type, $sql)->as_object($this->result_object)->execute($this->_db);
@@ -533,8 +613,8 @@ class SimpleModeler extends Model
 	* @param string $key returned array keys
 	* @param string $display returned array values
 	* @param string $order_by query ordering
-	* @param array $where where conditions
-	* @param string $direction query sorting				
+	* @param string $direction query sorting	
+	* @param array $where where conditions				
 	* @return array
 	*/
 	public function select_list($key, $display, $order_by = NULL,  $direction = 'ASC', $where = array())
@@ -546,10 +626,9 @@ class SimpleModeler extends Model
           $this->select(array($key, $display));
           
           $query = empty($where) ? $this->fetch_all($order_by, $direction) : $this->fetch_where($where, $order_by, $direction);
-		var_dump($query);
+
 		foreach ($query as $row)
 		{
-			var_dump($row);
 			$rows[$row->$key] = $row->$display;
 		}
 
@@ -585,12 +664,12 @@ class SimpleModeler extends Model
 	*/
 	public function clear_data()
 	{
-		array_fill_keys($this->data, '');
-		array_fill_keys($this->data_original, '');
+		$this->data = array_fill_keys($this->data, '');
+		$this->data_original = array_fill_keys($this->data_original, '');
 	}
 
 	/**
-	*  load table fields into $data	
+	*  load table fields into $data.	
 	*
 	* @return void
 	*/
@@ -626,13 +705,8 @@ class SimpleModeler extends Model
 	public function explain()
 	{
 		$columns = array_keys($this->_db->list_columns($this->table_name, TRUE));
-		$data = array();
-
-		foreach ($columns as $column) 
-		{ 
-			$data[$column] = '';
-		}
-		return $data;
+		$columns = array_fill_keys($columns, '');
+		return $columns;
 	}
 	
 	/**
@@ -650,6 +724,7 @@ class SimpleModeler extends Model
 	*
 	* @param string $key key to be retrived
 	* @return mixed
+	* @uses    check_alias()	
 	*/	
 	public function __get($key)
 	{
@@ -663,7 +738,7 @@ class SimpleModeler extends Model
 	}
 
 	/**
-	*  magic set to $data	
+	*  magic set for $data	
 	*
 	* @param string $key key to be modified
 	* @param string $value value to be set
@@ -687,7 +762,7 @@ class SimpleModeler extends Model
 	*/
 	public function __sleep()
 	{
-		// Store only information about the object without db property
+		// Store only information about the object, without db property
 		return array_diff(array_keys(get_object_vars($this)), array('_db'));
 	}
 	
