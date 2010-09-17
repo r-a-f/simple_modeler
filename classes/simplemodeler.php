@@ -3,12 +3,11 @@
  * SimpleModeler - addon for Kohana Model class
 *
 * @package		SimpleModeler
-* @category   		Library
 * @author			thejw23
 * @copyright		(c) 2009-2010 thejw23
 * @license		http://www.opensource.org/licenses/isc-license.txt
-* @version		2.0 for KohanaPHP 3.x
-* @last change		RC1
+* @version		2.0
+* @last change		
 * 
 * @NOTICE			table columns should be different from class varibales/methods names
 * @NOTICE			ie. having table column 'timestamp' or 'skip' may (and probably will) lead to problems
@@ -362,10 +361,13 @@ class SimpleModeler extends Model
 	 */
 	public function delete()
 	{
-		//if (intval($this->data[$this->primary_key]) !== 0) 
 		if (! empty($this->data[$this->primary_key]))
 		{
-			return db::delete($this->table_name)->where($this->primary_key, '=', $this->data[$this->primary_key])->execute($this->_db);
+			$result = db::delete($this->table_name)->where($this->primary_key, '=', $this->data[$this->primary_key])->execute($this->_db);
+			if ($result)
+			{
+				$this->clear_data();
+			}
 		}
 		return FALSE;
 	}
@@ -424,13 +426,7 @@ class SimpleModeler extends Model
 			$query->limit($this->limit)->offset($this->offset);
 		}
 		
-		foreach ($wheres as $where)
-		{
-			if (is_array($where))
-			{
-				$query->{$this->where}($where[0], $where[1], $where[2]);
-			}
-		}
+		$this->set_where($query,$wheres);
 
 		return $query->from($this->table_name)->as_object($this->result_object)->execute($this->_db);
 	}
@@ -578,6 +574,22 @@ class SimpleModeler extends Model
 
 		return NULL;
 	}
+	
+	public function set_where($query, $wheres)
+	{
+          if (is_array($wheres))
+		{
+			$query->{$this->where}($wheres[0], $wheres[1], $wheres[2]);
+		}
+		else
+		foreach ($wheres as $where)
+		{
+			if (is_array($where))
+			{
+				$query->{$this->where}($where[0], $where[1], $where[2]);
+			}
+		}
+	}
 
 	/**
 	*  shortcut for easier count limited records	
@@ -589,13 +601,7 @@ class SimpleModeler extends Model
 	{
 		$query = db::select(array('COUNT("'.$field.'")', 'total_rows'));
 
-		foreach ($wheres as $where)
-		{
-			if (is_array($where))
-			{
-				$query->{$this->where}($where[0], $where[1], $where[2]);
-			}
-		}
+		$this->set_where($query,$wheres);
 
 		$data =  $query->from($this->table_name)->execute($this->_db);
 		
@@ -775,6 +781,12 @@ class SimpleModeler extends Model
 	{
 		// Initialize database
 		$this->_db = Database::instance($this->_db);
+	}
+	
+	public function __isset($key)
+	{
+		$key = $this->check_alias($key);
+		return isset($this->data[$key]);
 	}
 
 }
