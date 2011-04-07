@@ -1,4 +1,5 @@
 <?php defined('SYSPATH') or die('No direct script access.');
+
 /**
  * SimpleModeler - addon for Kohana Model class
 *
@@ -6,7 +7,7 @@
 * @author			thejw23
 * @copyright		(c) 2009-2010 thejw23
 * @license		http://www.opensource.org/licenses/isc-license.txt
-* @version		2.0
+* @version		2.0.1
 * @last change		
 * 
 * @NOTICE			table columns should be different from class varibales/methods names
@@ -16,8 +17,10 @@
 * class name changed to prevent conflicts while using original Auto_Modeler 
 */
 
-class SimpleModeler_Core extends Model 
+class SimpleModeler_Core extends Model_Database 
 {
+	const VERSION = '2.0.1';
+	
 	/**
 	 * @var  string  Table name
 	 */
@@ -39,7 +42,7 @@ class SimpleModeler_Core extends Model
 	protected $hash_suffix = '';
 	 	
 	/**
-	 * @var  boolean  Weather or not to trim all saved fields
+	 * @var  boolean  Whether or not to trim all saved fields
 	 */
 	protected $auto_trim = FALSE;
 
@@ -108,6 +111,22 @@ class SimpleModeler_Core extends Model
 	 * @var  boolean  Weather or not read fields from the database or from the model class ($data) 
 	 */
 	public $auto_fields = FALSE;
+	
+	protected $_state = SimpleModeler::STATE_NEW;
+
+	const STATE_NEW = 'new';
+	const STATE_LOADING = 'loading';
+	const STATE_LOADED = 'loaded';
+	const STATE_DELETED = 'deleted';
+
+	// Lists available states for this model
+	protected $_states = array(
+		SimpleModeler::STATE_NEW,
+		SimpleModeler::STATE_LOADING,
+		SimpleModeler::STATE_LOADED,
+		SimpleModeler::STATE_DELETED
+	);
+	
 
 	/**
 	 * Constructor, optionally loads the row with given primary key
@@ -123,6 +142,8 @@ class SimpleModeler_Core extends Model
 	public function __construct($id = FALSE)
 	{
 		parent::__construct();
+		
+		$this->result_object = get_class($this);
 
 		if ($id != FALSE)
 		{
@@ -178,7 +199,8 @@ class SimpleModeler_Core extends Model
 	/**
 	 * Generates user fiendly $data array with table columns
 	 * 	 
-	 *     echo SimpleModeler::instance('my_model')->generate_data();
+	 *	 //example use     
+	 *	 echo SimpleModeler::instance('my_model')->generate_data();
 	 *
 	 * @return  string
 	 */
@@ -263,24 +285,29 @@ class SimpleModeler_Core extends Model
 		$this->check_skip();
 
 		// Do an update
-		if ($this->loaded())
+		//if ($this->loaded())
+		if ($this->state() == SimpleModeler::STATE_LOADED)
 		{ 
-			return count(db::update($this->table_name)->set($this->data_to_save)->where($this->primary_key, '=', $this->data[$this->primary_key])->execute($this->_db));
+			return count(DB::update($this->table_name)->set($this->data_to_save)->where($this->primary_key, '=', $this->data[$this->primary_key])->execute());
 		}
 		else // Do an insert
 		{
-			$id = db::insert($this->table_name)->columns(array_keys($this->data_to_save))->values(array_values($this->data_to_save))->execute($this->_db);
+			$id = DB::insert($this->table_name)->columns(array_keys($this->data_to_save))->values(array_values($this->data_to_save))->execute();
+			
+			$this->state(SimpleModeler::STATE_LOADED);
+			
 			$this->data[$this->primary_key] = $id[0];
 			$this->data_original = $this->data;
 			
 			if (! empty($id[0]) AND !empty($this->hash_field))
 			{
-				db::update($this->table_name)->set(array($this->hash_field => sha1($this->table_name.$id[0].$this->hash_suffix)))->where($this->primary_key, '=', $this->data[$this->primary_key])->execute($this->_db);
+				DB::update($this->table_name)->set(array($this->hash_field => sha1($this->table_name.$id[0].$this->hash_suffix)))->where($this->primary_key, '=', $this->data[$this->primary_key])->execute();
 			}
 			
 			return $id;
 		}
-		return NULL;
+		//return NULL;
+		throw new SimpleModeler_Exception($status['string'], array(), $status['errors']);
 	}
 	
 	/**
@@ -312,18 +339,62 @@ class SimpleModeler_Core extends Model
 	* @return self
 	 */
 	public function load($value, $key = NULL)
-	{
+	{		
+		$this->_state = SimpleModeler::STATE_LOADING;
+		
 		(empty($key)) ? $key = $this->primary_key : NULL;
 		
-		$data = db::select_array($this->select)->from($this->table_name)->where($key, '=', $value)->as_object($this->result_object)->execute($this->_db);
+		$data = DB::select_array($this->select)->from($this->table_name)->where($key, '=', $value)->as_object($this->result_object)->execute();
 
 		if (count($data) === 1 AND $data = $data->current())
 		{
-			$this->data_original = (array) $data;
+			$this->data_original = $data->as_array();
 			$this->data = $this->data_original; 
 		}
+		
+		$this->process_load_state();
 	
 		return $this;
+	}
+	
+	/**
+	 * Processes the object state before a load() finishes
+	 *
+	 * @return null
+	 */
+	public function process_load_state()
+	{
+		if ($this->id)
+		{
+			$this->_state = SimpleModeler::STATE_LOADED;
+		}
+		else
+		{
+			$this->_state = SimpleModeler::STATE_NEW;
+		}
+	}
+	
+	/**
+	 * Gets/sets the object state
+	 *
+	 * @return string/$this when getting/setting
+	 */
+	public function state($state = NULL)
+	{
+		if ($state)
+		{
+			if ( ! in_array($state, $this->_states))
+			{
+				//return NULL;
+				throw new SimpleModeler_Exception('Invalid state');
+			}
+
+			$this->_state = $state;
+
+			return $this;
+		}
+
+		return $this->_state;
 	}
 	
 	/**
@@ -341,7 +412,7 @@ class SimpleModeler_Core extends Model
 	{
 		(empty($key)) ? $key = $this->primary_key : NULL;
 				
-		$data = $data = db::select_array($this->select)->from($this->table_name)->where($key, '=', $value)->as_object($this->result_object)->execute($this->_db);
+		$data = $data = DB::select_array($this->select)->from($this->table_name)->where($key, '=', $value)->as_object($this->result_object)->execute();
 
 		if (count($data) === 1 AND $data = $data->current())
 		{				
@@ -361,15 +432,20 @@ class SimpleModeler_Core extends Model
 	 */
 	public function delete()
 	{
-		if (! empty($this->data[$this->primary_key]))
-		{
-			$result = db::delete($this->table_name)->where($this->primary_key, '=', $this->data[$this->primary_key])->execute($this->_db);
+		$result = false;
+		if (SimpleModeler::STATE_LOADED)
+		{	
+		//if (! empty($this->data[$this->primary_key]))
+		//{
+			$result = DB::delete($this->table_name)->where($this->primary_key, '=', $this->data[$this->primary_key])->execute();
 			if ($result)
 			{
 				$this->clear_data();
+				$this->_state = SimpleModeler::STATE_DELETED;
 			}
 		}
-		return FALSE;
+		return $result;
+		//throw new SimpleModeler_Exception('Cannot delete a non-loaded model '.get_class($this).'!', array(), array());
 	}
 
 	/**
@@ -388,14 +464,15 @@ class SimpleModeler_Core extends Model
 	{
 		(empty($order_by)) ? $order_by = $this->primary_key : NULL;   
 
-		$query =  db::select_array($this->select)->order_by($order_by, $direction);
+		$query =  DB::select_array($this->select)->order_by($order_by, $direction);
 				
 		if ( ! empty($this->limit)) 
 		{
 			$query->limit($this->limit)->offset($this->offset);
 		}
 		
-		$result =  $query->from($this->table_name)->as_object($this->result_object)->execute($this->_db);
+		$result =  $query->from($this->table_name)->as_object($this->result_object)->execute();
+		
 		return $result;
 	} 
 	
@@ -419,7 +496,7 @@ class SimpleModeler_Core extends Model
 		if (! is_array($wheres))
 			return FALSE;
 			
-		$query = db::select_array($this->select)->order_by($order_by, $direction);
+		$query = DB::select_array($this->select)->order_by($order_by, $direction);
 		 
 		if ( ! empty($this->limit))
 		{ 				
@@ -428,7 +505,9 @@ class SimpleModeler_Core extends Model
 		
 		$this->set_where($query,$wheres);
 
-		return $query->from($this->table_name)->as_object($this->result_object)->execute($this->_db);
+		$result = $query->from($this->table_name)->as_object($this->result_object)->execute();
+		
+		return $result;
 	}
 
 	/**
@@ -442,7 +521,7 @@ class SimpleModeler_Core extends Model
 	 */
 	public function query($sql, $type = 'SELECT')
 	{
-		return db::query($type, $sql)->as_object($this->result_object)->execute($this->_db);
+		return DB::query($type, $sql)->as_object($this->result_object)->execute();
 	} 
 		
 	/**
@@ -565,11 +644,11 @@ class SimpleModeler_Core extends Model
 	*/
 	public function count_all($field = '*') 
 	{
-		$data = db::select(array('COUNT("'.$field.'")', 'total_rows'))->from($this->table_name)->execute($this->_db);
+		$data = DB::select(array('COUNT("'.$field.'")', 'total_rows'))->from($this->table_name)->execute();
 		
 		if (count($data) === 1 AND $data = $data->current())
 		{				
-			return $data;
+			return $data['total_rows'];
 		}
 
 		return NULL;
@@ -577,11 +656,6 @@ class SimpleModeler_Core extends Model
 	
 	public function set_where($query, $wheres)
 	{
-          if (is_array($wheres))
-		{
-			$query->{$this->where}($wheres[0], $wheres[1], $wheres[2]);
-		}
-		else
 		foreach ($wheres as $where)
 		{
 			if (is_array($where))
@@ -599,15 +673,15 @@ class SimpleModeler_Core extends Model
 	*/
 	public function count_where($wheres = array(), $field = '*') 
 	{
-		$query = db::select(array('COUNT("'.$field.'")', 'total_rows'));
+		$query = DB::select(array('COUNT("'.$field.'")', 'total_rows'));
 
 		$this->set_where($query,$wheres);
 
-		$data =  $query->from($this->table_name)->execute($this->_db);
+		$data =  $query->from($this->table_name)->execute();
 		
 		if (count($data) === 1 AND $data = $data->current())
 		{				
-			return $data;
+			return $data['total_rows'];
 		}
 		
 		return NULL;
@@ -681,7 +755,7 @@ class SimpleModeler_Core extends Model
 	*/
 	public function load_columns() 
 	{
-		if ( ! empty($this->table_name) AND (empty($this->data_original)) )
+		if ( ! empty($this->table_name) AND (empty($this->data)) )
 		{
 			if (! IN_PRODUCTION AND $this->auto_fields)  
 			{
@@ -692,7 +766,7 @@ class SimpleModeler_Core extends Model
 			}
 			else // rise an error? 
 			{
-				Kohana_Log::instance()->add('alert', 'Simple_Modeler, IN_PRODUCTION is TRUE and there is empty $data for table: '.$this->table_name);
+				Kohana::$log->add(Log::WARNING, 'Simple_Modeler, IN_PRODUCTION is TRUE and there is empty $data for table: '.$this->table_name);
 			}
 		}
 
@@ -710,7 +784,7 @@ class SimpleModeler_Core extends Model
 	*/ 
 	public function explain()
 	{
-		$columns = array_keys($this->_db->list_columns($this->table_name, TRUE));
+		$columns = array_keys(Database::instance()->list_columns($this->table_name, TRUE));
 		$columns = array_fill_keys($columns, '');
 		return $columns;
 	}
@@ -740,7 +814,10 @@ class SimpleModeler_Core extends Model
 		{
 			return $this->data[$key];
 		}
-		return NULL;
+		//var_dump($this->data['id']);
+		
+		//return NULL;
+		throw new SimpleModeler_Exception('Field '.$key.' does not exist in '.get_class($this).'!', array(), '');
 	}
 
 	/**
@@ -758,7 +835,9 @@ class SimpleModeler_Core extends Model
 		{
 			return ($this->auto_trim) ? $this->data[$key] = trim($value) : $this->data[$key] = $value;
 		}
-		return NULL;
+		
+		//return NULL;
+		throw new SimpleModeler_Exception('Field '.$key.' does not exist in '.get_class($this).'!', array(), '');
 	}
 
 	/**
@@ -780,7 +859,7 @@ class SimpleModeler_Core extends Model
 	public function __wakeup()
 	{
 		// Initialize database
-		$this->_db = Database::instance($this->_db);
+		$this->_db = Database::instance();
 	}
 	
 	public function __isset($key)
@@ -789,4 +868,20 @@ class SimpleModeler_Core extends Model
 		return isset($this->data[$key]);
 	}
 
+}
+
+class SimpleModeler_Exception extends Kohana_Exception
+{
+	public $errors;
+
+	public function __construct($title, array $message = NULL, $errors = '')
+	{
+		parent::__construct($title, $message);
+		$this->errors = $errors;
+	}
+
+	public function __toString()
+	{
+		return $this->message;
+	}
 }
