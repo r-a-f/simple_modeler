@@ -1,1 +1,1 @@
-Simple Modeler for KohanaPHP 3.0
+Simple Modeler for KohanaPHP 3.1
