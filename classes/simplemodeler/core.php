@@ -392,7 +392,7 @@ class SimpleModeler_Core extends Model_Database implements ArrayAccess
 	{
 		(empty($key)) ? $key = $this->primary_key : NULL;
 
-		$data = DB::select_array($this->select)->from($this->table_name)->where($key, '=', $value)->as_object($this->result_object)->execute();
+		$data = DB::select_array($this->select)->from($this->table_name)->where($key, '=', $value)->execute(); //->as_object($this->result_object)->execute();
 		
 		if (count($data) === 1 AND $data = $data->current())
 		{
